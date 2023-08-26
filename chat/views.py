@@ -11,6 +11,7 @@ import time
 import datetime
 import tiktoken
 import logging
+import requests  # for filebot http request
 
 from provider.models import ApiKey
 from stats.models import TokenUsage
@@ -352,7 +353,7 @@ def upload_conversations(request):
             {'error': import_err_msg},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
     # return a list of new conversation id
     return Response(conversation_ids)
 
@@ -429,6 +430,22 @@ def conversation(request):
     def stream_content():
         try:
             if messages['renew']:
+                last_message = messages['messages'][-1]['content']
+
+                response = requests.post(
+                    'http://filebot:8080/get-filebot-response',
+                    json={"user_prompt": last_message}
+                )
+
+                filebot_message = response.json()  # This assumes that the response is in JSON format
+
+
+                messages['messages'].pop(-1)
+                # Chatgpt: I get this error 'dict' object has no attribute 'prompt'
+                print("filebot-message\n", filebot_message)
+                messages['messages'].append({"role": "system", "content": filebot_message['prompt']})
+
+
                 openai_response = my_openai.ChatCompletion.create(
                     model=model['name'],
                     messages=messages['messages'],
@@ -439,6 +456,9 @@ def conversation(request):
                     presence_penalty=presence_penalty,
                     stream=True,
                 )
+
+                messages['messages'].pop(-1)
+                messages['messages'].append({"role": "user", "content": last_message})
         except Exception as e:
             yield sse_pack('error', {
                 'error': str(e)
@@ -476,7 +496,7 @@ def conversation(request):
                     'error': e
                 },
                 status=status.HTTP_400_BAD_REQUEST
-            ) 
+            )
 
         collected_events = []
         completion_text = ''
@@ -650,7 +670,7 @@ def build_messages(model, user, conversation_id, new_messages, web_search_params
 
     ordered_messages_list += [{
         'is_bot': False,
-        'message': msg['content'], 
+        'message': msg['content'],
         'message_type': message_type,
         'embedding_message_doc': msg.get('embedding_message_doc', None),
     } for msg in new_messages]
