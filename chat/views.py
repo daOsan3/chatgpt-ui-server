@@ -432,19 +432,20 @@ def conversation(request):
             if messages['renew']:
                 last_message = messages['messages'][-1]['content']
 
-                response = requests.post(
-                    'http://filebot:8080/get-filebot-response',
-                    json={"user_prompt": last_message}
-                )
+                # Check if the last message has the text "/filebotActivate" in it
+                if "/filebotActivate" in last_message:
+                    last_message = last_message.replace("/filebotActivate", "").strip()  # Remove the "/filebotActivate" from the message
 
-                filebot_message = response.json()  # This assumes that the response is in JSON format
+                    response = requests.post(
+                        'http://filebot:8080/get-filebot-response',
+                        json={"user_prompt": last_message}
+                    )
+                    filebot_message = response.json()  # This assumes that the response is in JSON format
 
-
-                messages['messages'].pop(-1)
-                # Chatgpt: I get this error 'dict' object has no attribute 'prompt'
-                print("filebot-message\n", filebot_message)
-                messages['messages'].append({"role": "system", "content": filebot_message['prompt']})
-
+                    messages['messages'].pop(-1)
+                    print("filebot-message\n", filebot_message)
+                    messages['messages'].append({"role": "system", "content": filebot_message['prompt']})
+                # If the above condition isn't met, the messages aren't modified and are passed to ChatCompletion as they are.
 
                 openai_response = my_openai.ChatCompletion.create(
                     model=model['name'],
