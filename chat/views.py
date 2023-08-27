@@ -432,20 +432,17 @@ def conversation(request):
             if messages['renew']:
                 last_message = messages['messages'][-1]['content']
 
-                # Check if the last message has the text "/filebotActivate" in it
                 if "/filebotActivate" in last_message:
-                    last_message = last_message.replace("/filebotActivate", "").strip()  # Remove the "/filebotActivate" from the message
-
+                    last_message = last_message.replace("/filebotActivate", "").strip()
                     response = requests.post(
                         'http://filebot:8080/get-filebot-response',
                         json={"user_prompt": last_message}
                     )
-                    filebot_message = response.json()  # This assumes that the response is in JSON format
+                    filebot_message = response.json()
 
                     messages['messages'].pop(-1)
                     print("filebot-message\n", filebot_message)
                     messages['messages'].append({"role": "system", "content": filebot_message['prompt']})
-                # If the above condition isn't met, the messages aren't modified and are passed to ChatCompletion as they are.
 
                 openai_response = my_openai.ChatCompletion.create(
                     model=model['name'],
@@ -460,22 +457,18 @@ def conversation(request):
 
                 messages['messages'].pop(-1)
                 messages['messages'].append({"role": "user", "content": last_message})
+
         except Exception as e:
-            yield sse_pack('error', {
-                'error': str(e)
-            })
+            yield sse_pack('error', {'error': str(e)})
             print('openai error', e)
             return
 
         if conversation_id:
-            # get the conversation
             conversation_obj = Conversation.objects.get(id=conversation_id)
         else:
-            # create a new conversation
             conversation_obj = Conversation(user=request.user)
             conversation_obj.save()
 
-        # insert new messages
         try:
             for m in message_object_list:
                 message_obj = create_message(
@@ -488,33 +481,40 @@ def conversation(request):
                     tokens=messages['tokens'],
                     api_key=api_key
                 )
-                yield sse_pack('userMessageId', {
-                    'userMessageId': message_obj.id,
-                })
+                yield sse_pack('userMessageId', {'userMessageId': message_obj.id})
         except Exception as e:
-            return Response(
-                {
-                    'error': e
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({'error': e}, status=status.HTTP_400_BAD_REQUEST)
 
         collected_events = []
         completion_text = ''
-        if messages['renew']:  # return LLM answer
-            # iterate through the stream of events
+        if messages['renew']:
             for event in openai_response:
-                collected_events.append(event)  # save the event response
-                # print(event)
+                collected_events.append(event)
                 if event['choices'][0]['finish_reason'] is not None:
                     break
                 if 'content' in event['choices'][0]['delta']:
                     event_text = event['choices'][0]['delta']['content']
-                    completion_text += event_text  # append the text
+                    completion_text += event_text
                     yield sse_pack('message', {'content': event_text})
+
+            # After streaming the content from OpenAI, send the extra content
+            extra_content = ""
+
+            if 'files' in filebot_message and filebot_message['files']:
+                file_paths = filebot_message['files']
+                if len(file_paths) == 1:
+                    extra_content += f"\n\nsource: {file_paths[0]}"
+                elif len(file_paths) > 1:
+                    extra_content += f"\n\nsource: {file_paths[0]}\n\nOther (not used in answer above):"
+                    for idx, path in enumerate(file_paths[1:], start=1):
+                        extra_content += f"\n{idx}. {path}"
+
+            if extra_content:
+                yield sse_pack('message', {'content': extra_content})
+
             bot_message_type = Message.plain_message_type
-            ai_message_token = num_tokens_from_text(completion_text, model['name'])
-        else:  # wait for process context
+            ai_message_token = num_tokens_from_text(completion_text + extra_content, model['name'])
+        else:
             if new_doc_title:
                 completion_text = f'{new_doc_title} added.'
             else:
