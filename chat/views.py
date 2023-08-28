@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import asyncio
 import json
@@ -433,10 +434,19 @@ def conversation(request):
                 last_message = messages['messages'][-1]['content']
 
                 if "/filebotActivate" in last_message:
-                    last_message = last_message.replace("/filebotActivate", "").strip()
+                    # Use regex to capture the value in double quotes after "/filebotActivate="
+                    match = re.search(r'/filebotActivate="([^"]*)"', last_message)
+                    if match:
+                        store_value = match.group(1)
+                    else:
+                        # Handle the case where the format is not as expected
+                        store_value = ""
+
+                    json_send={"user_prompt": last_message, "store": store_value}
+                    print('sent to filebot:', json_send)
                     response = requests.post(
                         'http://filebot:8080/get-filebot-response',
-                        json={"user_prompt": last_message}
+                        json=json_send
                     )
                     filebot_message = response.json()
 
